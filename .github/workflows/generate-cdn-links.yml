@@ -1,0 +1,86 @@
+name: Generate CDN Links with Preview
+
+on:
+  push:
+    branches:
+      - main  # or your default branch
+
+jobs:
+  generate-cdn-links:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Generate CDN links with preview
+        run: |
+          import os
+          import mimetypes
+          import html
+
+          REPO = os.environ['GITHUB_REPOSITORY']
+          BRANCH = os.environ['GITHUB_REF_NAME']
+
+          def get_cdn_url(filepath):
+              return f'https://raw.githack.com/{REPO}/{BRANCH}/{filepath}'
+
+          def is_image(filepath):
+              mime, _ = mimetypes.guess_type(filepath)
+              return mime and mime.startswith('image/')
+
+          def is_text(filepath):
+              mime, _ = mimetypes.guess_type(filepath)
+              return mime and (mime.startswith('text/') or 'json' in mime or 'xml' in mime)
+
+          def get_preview(filepath, cdn_url):
+              if is_image(filepath):
+                  # Markdown image preview
+                  return f'![]({cdn_url})'
+              elif is_text(filepath):
+                  # Show first 5 lines of text/code file
+                  try:
+                      with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+                          lines = [html.escape(f.readline().rstrip('\n')) for _ in range(5)]
+                          content = '\n'.join(lines)
+                          return f'<pre><code>{content}</code></pre>'
+                  except Exception as e:
+                      return f'`(preview error)`'
+              else:
+                  # Generic file icon
+                  return '📄'
+
+          rows = []
+          for root, dirs, files in os.walk('.'):
+              for file in files:
+                  if root.startswith('./.git'):
+                      continue
+                  filepath = os.path.join(root, file).replace('./', '')
+                  if filepath.startswith('.github/') or filepath == 'cdn_links.md':
+                      continue
+                  cdn_url = get_cdn_url(filepath)
+                  preview = get_preview(filepath, cdn_url)
+                  # Markdown table row: | Preview | [filename](cdn_url) |
+                  rows.append(f'| {preview} | [{filepath}]({cdn_url}) |')
+
+          with open('cdn_links.md', 'w', encoding='utf-8') as f:
+              f.write('# CDN Links\n\n')
+              f.write('Preview | CDN Link\n')
+              f.write('--- | ---\n')
+              f.write('\n'.join(rows) + '\n')
+        shell: python
+
+      - name: Commit and push cdn_links.md
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add cdn_links.md
+          git commit -m "Update CDN links with previews [skip ci]" || echo "No changes to commit"
+          git push
